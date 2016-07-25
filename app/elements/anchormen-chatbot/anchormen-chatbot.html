@@ -1,0 +1,224 @@
+<!--
+@license
+Copyright (c) 2015 The Polymer Project Authors. All rights reserved.
+This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
+The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
+The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
+Code distributed by Google as part of the polymer project is also
+subject to an additional IP rights grant found at http://polymer.github.io/PATENTS.txt
+-->
+<script src="https://code.jquery.com/jquery-2.2.4.min.js"></script>
+<link rel="import" href="../../bower_components/polymer/polymer.html">
+<link rel="import" href="../../bower_components/paper-styles/typography.html">
+<link rel="import" href="../../bower_components/paper-input/paper-input.html">
+<link rel="stylesheet" href="../../styles/main.css">
+<style is="custom-style" include="shared-styles"></style>
+<dom-module id="anchormen-chatbot">
+  <template>
+    <style>
+      span {
+        @apply(--paper-font-body1);
+      }
+      .messages {
+        max-height:60vh;
+        overflow-y:scroll;
+        padding-right:15px;
+      }
+      .message {
+        width:80%;
+        margin-left:20%;        
+        text-align:right;
+        border-bottom:1px solid #e63f20;
+        margin-bottom:15px;
+        padding-bottom:5px;
+        min-height:60px;
+      }
+      .message .time-badge {
+        font-size:0.6em;
+      }
+      .message[data-sender='bot'] {
+        margin-right:20%;
+        margin-left:0;
+        border-bottom:1px solid  #aa2117;
+        text-align:left;
+        padding-left:50px;
+        background:url("../../images/chatbot.png") left top no-repeat;
+        background-size:40px;
+      }
+      --paper-icon-button-ink-color {
+        color:#e63f20;
+      }
+    </style>    
+    <div class="messages" id="messageListContainer">
+      <template is="dom-repeat" items="{{messages}}" id="messageList">
+        <div class="message" data-sender$="{{item.sender}}">
+          {{item.message}}
+          <br />
+          <span class="time-badge">
+            {{item.time}}
+          </span>
+        </div>
+      </template>
+    </div>
+    <form is="iron-form" id="form">
+      <paper-input-container>
+        <input is="iron-input" id="question" placeholder="Your question" autocomplete="off" />
+        <paper-icon-button suffix icon="send" style="color:#aa2117"></paper-icon-button>
+      </paper-input>    
+    </form>
+  </template>
+  
+  <script>
+    (function() {
+      'use strict';
+
+      Polymer({
+        is: 'anchormen-chatbot',
+
+        properties: {
+          items: {
+            type: Array,
+            notify: true
+          },
+          days: {
+            type: Array,
+            notify: true
+          },
+          messages: {
+            type: Array,
+            notify: true,
+            observer: "getMessages",
+            value: []
+          }
+        },
+        endpoint: "http://chatclient.ep4u6dexgm.eu-central-1.elasticbeanstalk.com",
+        sessionId: null,
+        pointer: null,
+
+        initOpts: {
+          session: "",
+          pointer: 0
+        },
+        intervalTimer: null,
+        listeners: {
+          "form.submit": "handleAdd"
+        },
+        handleAdd: function(e) {
+          var question = this.$.question.value;
+          this.$.question.value = '';        
+          e.preventDefault();
+           $.ajax({
+                url: this.endpoint + '/send-msg',
+                type: 'POST',
+                dataType: 'json',
+                data: {
+                    session: localStorage.getItem('session'),
+                    message: question
+                },
+            })
+            .done(() => {
+                this.resetDataInterval();
+                this.getMessages();
+                this.$.question.value = '';
+            })
+            .fail(function() {
+                console.log("error");
+            })
+            .always(function() {
+                 console.log("complete");
+            });
+        },
+        resetDataInterval: function() {
+          if(this.intervalTimer) {
+            clearInterval(this.intervalTimer);
+          } 
+          this.intervalTimer = setInterval(() => { this.getMessages() }, 2000)
+        },
+        ready: function() {
+          this.async(() =>{
+            this.init().then(() => { 
+              this.getMessages().then((res) => {                  
+                                    
+              }) 
+            })
+          })
+          this.resetDataInterval()        
+        }, 
+        getFormData: function() {
+          let formData = new FormData();
+          formData.append("session", this.initOpts != null ? this.initOpts.session : "")
+          formData.append("pointer", this.initOpts != null ? this.initOpts.pointer : "0")
+          return formData;          
+        },
+        getRequestOptions: function(){
+          var myHeaders = new Headers();
+          myHeaders.append("content-type", "application/json");     
+          return { 
+            method: 'POST',               
+            mode: 'no-cors',
+            headers: myHeaders,
+            body: this.getFormData(),
+            cache: 'no-store' 
+          };
+        },
+
+        init: function() {
+          var self = this;
+          return new Promise((resolve, reject) => {
+            $.ajax({
+              url: this.endpoint + '/init',
+              type: 'POST',
+              dataType: 'json',
+              data: { 
+                  session: localStorage.getItem('session')
+              }
+            })
+            .done(json => {
+                this.initOpts.session = json.session;
+                localStorage.setItem('session', json.session );
+                localStorage.setItem('pointer', "0")
+                resolve();
+            })
+            .fail(function() {
+                console.log("error");                
+                reject();
+            })
+          })        
+        
+        },
+        getMessages: function () {
+          console.log("Getting messages");          
+          var self = this;
+          return new Promise((resolve, reject) => {
+            $.ajax({
+               url: this.endpoint + '/check',
+              type: 'POST',
+              dataType: 'json',
+              data: { 
+                  session: localStorage.getItem('session'),
+                  pointer: localStorage.getItem('pointer') || 0
+              } 
+            })
+            .done(json => {
+                let messages = json.messages;
+                var hasNew = localStorage.getItem('pointer') && localStorage.getItem('pointer') != json.pointer;
+                localStorage.setItem('pointer', json.pointer);
+                messages.forEach(msg => {
+                  this.push("messages", msg); 
+                })
+                setTimeout(() => {
+                  if(hasNew) {
+                    this.$.messageListContainer.scrollTop = this.$.messageListContainer.scrollHeight;
+                  }
+                })
+                resolve(messages);
+            })
+            .fail(function() {
+                console.log("error");
+            })
+          })
+        }
+      });
+    })();
+  </script>
+</dom-module>
